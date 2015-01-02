@@ -1,35 +1,162 @@
-# dplyr 0.3.0.9000
+* `summarise` handles list output columns (#832)
 
-* Hybrid version of `lead` and `lag` are enabled, only for the simple 2 args case
-  for now, i.e. `lag(x, 2)`. All other forms still fall back to R version. 
+# dplyr 0.3.1.9000
 
-* `right_join()` and `outer_join()` ... (#96).  
+## New features
 
-* `mutate` now handles complex vectors (#436)
+* `add_rownames()` turns row names into an explicit variable (#639).
 
-* More flexible handling of the `order_by` argument in hybrid versions of `first`, 
-  `nth` and `last`. When `order_by` is a symbol, the hybrid version is used, 
-  otherwise standard R evaluation is used. This might get further optimized for 
-  more cases later (#626)
+* `as_data_frame()` efficiently coerces a list into a data frame (#749).
 
-* Better naming of columns in joins (#655).   
+* `bind_rows()` and `bind_cols()` efficiently bind a list of data frames by 
+  row or column. `combine()` applies the same coercion rules to vectors 
+  (it works like `c()` or `unlist()` but is consistent).
 
-* hybrid `lag` and `lead` only handles simple call forms, the first 
-  argument must have either no name or be called `x`. 
-  Then the second argument must be either missing, with no name or be called `n`. 
-  All other forms of the call are handled by R evaluation. (#683).
+* `right_join()` (include all rows in `y`, and matching rows in `x`) and
+  `full_join()` (include all rows in `x` and `y`) complete the family of
+  matching joins (#96).
 
-* Fixed segfault in `JoinStringFactorVisitor` class (#688).
+* `group_indices()` computes a unique integer id for each group (#771). It 
+  can be called on a grouped_df without any arguments or on a data frame
+  with same arguments as `group_by()`.
 
-* `grouped_df` requires `vars` to be a list of symbols (#665).
+## New vignettes
 
-* Added class `JoinFactorFactorVisitor_SameLevels` for the special case when 
-  two factors with the same levels (in the same order) are joined (#675). 
+* `vignette("data_frame")` describes dplyr functions that make it easier
+  and faster to create and coerce data frames. It subsumes the old `memory` 
+  vignette.
+
+* `vignette("two-table")` describe how the two-table verbs work in dplyr.
+
+## Minor improvements
+
+* `data_frame()` (and `as_data_frame()` & `tbl_df()`) now explicitly
+  forbid columns that are data frames or matrices (#775).
+
+* `do()` uses lazyeval to correctly evaluate its arguments in the correct 
+  environment (#744), and `do_()` is the SE equivalent of `do()` (#718).
+  You can modify grouped data in place: this is probably a bad idea but it's
+  sometimes convenient (#737). `do()` on grouped data tables now passes in all 
+  columns (not all columns except grouping vars) (#735, thanks to @kismsu).
+  `do()` with database tables no longer potentially includes grouping 
+  variables twice (#673). Finally, it's more consistent when there are
+  no rows/no groups (#625).
+
+* `first()` and `last()` preserve factors, dates and times (#509). 
+
+* Overhaul of single table verbs for data.table backend. They now all use
+  a consistent (and simpler) code base. This ensures that (e.g.) `n()`
+  now works in all verbs (#579).
+
+* In `*_join()`, you can now name only those variables that are different between
+  the two tables, e.g. `inner_join(x, y, c("a", "b", "c" = "d"))` (#682).
+  If non-join colums are the same, dplyr will add `.x` and `.y` 
+  suffixes to distinguish the source (#655).   
+
+* `mutate()` handles complex vectors (#436) and forbids `POSIXlt` results 
+  (instead of crashing) (#670). 
+
+* `select()` now implements a more sophisticated algorithm so if you're
+  doing multiples includes and excludes with and without names, you're more
+  likely to get what you expect (#644). You'll also get a better error
+  message if you supply an input that doesn't resolve to an integer 
+  column position (#643).
+
+* Printing has recieved a number of small tweaks. All `print()` method methods 
+  invisibly return their input so you can interleave `print()` statements into a
+  pipeline to see interim results. `print()` will column names of 0 row data 
+  frames (#652), and will never print more 20 rows (i.e. 
+  `options(dplyr.print_max)` is now 20), not 100 (#710). Row names are no 
+  never printed since no dplyr method is guaranteed to preserve them (#669).
   
-* `mutate` forbids `POSIXlt` results (#670). 
+    `glimpse()` prints the number of observations (#692)
+    
+    `type_sum()` gains a data frame method.
 
-* Initial hybrid handling of `%in%` (#126). 
+* `slice()` works for data tables (#717). Documentation clarifies that
+  slice can't work with relational databases. The examples now show
+  how to achieve the same results using `filter()` (#720).
+
+* dplyr now requires RSQLite >= 1.0. This shouldn't affect your code
+  in any way (except that RSQLite now doesn't need to be attached) but does 
+  simplify the internals (#622).
   
+* Functions that need to combine multiple results into a single column
+  (e.g. `join()`, `bind_rows()` and `summarise()`) are more careful about
+  coercion.
+  
+    Joining factors with the same levels in the same order preserves the 
+    original levels (#675). Joining factors with non-identical levels
+    generates a warning and coerces to character (#684). Joining a character
+    to a factor (or vice versa) generates a warning and coerces to character.
+    Avoid these warnings by ensuring your data is compatible before joining.
+         
+    `rbind_list()` will throw an error if you attempt to combine an integer and 
+    factor (#751). `rbind()`ing a column full of `NA`s is allowed and just 
+    collects the appropriate missing value for the column type being collected 
+    (#493). 
+  
+    `summarise()` is more careful about `NA`, e.g. the decision on the result 
+    type will be delayed until the first non NA value is returned. (#599). 
+    It will complain about loss of precision coercion, which can happen for 
+    expression that return integers for some groups and a doubles for others 
+    (#599).
+
+* A number of functions gained new or improved hybrid handlers: `first()`, 
+  `last()`, `nth()` (#626), `lead()` & `lag()` (#683), `%in%` (#126). That means
+  when you use these functions in a dplyr verb, we handle them in C++, rather
+  than calling back to R, and hence improving performance.
+
+    Hybrid `min_rank()` correctly handles `NaN` values (#726). Hybrid 
+    implementation of `nth()` falls back to R evaluation when `n` is not 
+    a length one integer or numeric, e.g. when it's an expression (#734).
+
+* join functions only warn once about each incompatibility (#798).     
+    
+* `filter` returns its input when it has no rows or no columns (#782). 
+
+* Join functions keep attributes (e.g. time zone information) from the 
+  left argument for `POSIXct` and `Date` objects (#819). 
+
+## Bug fixes
+
+* `[.tbl_df` correctly computes row names for 0-column data frames, avoiding
+  problems with xtable (#656). `[.grouped_df` will silently drop grouping
+  if you don't include the grouping columns (#733).
+
+* `data_frame()` now acts correctly if the first argument is a vector to be
+  recycled. (#680 thanks @jimhester)
+
+* `filter.data.table()` works if the table has a variable called "V1" (#615).
+
+* `*_join()` keeps columns in original order (#684). 
+  Joining a factor to a character vector doesn't segfault (#688).
+
+* `*_join.data.table()` works when data.table isn't attached (#786).
+
+* `group_by()` on a data table preserves original order of the rows (#623).
+  `group_by()` supports variables with more than 39 characters thanks to
+  a fix in lazyeval (#705). It gives meaninful error message when a variable 
+  is not found in the data frame (#716). 
+
+* `grouped_df()` requires `vars` to be a list of symbols (#665).
+
+* `rename_()` generic gets missing `.dots` argument (#708).
+  
+* `row_number()`, `min_rank()`, `percent_rank()`, `dense_rank()`, `ntile()` and
+  `cume_dist()` handle data frames with 0 rows (#762). They all preserve
+  missing values (#774). `row_number()` doesn't segfault when giving an external
+  variable with the wrong number of variables (#781) 
+  
+* `min(.,na.rm = TRUE)` works with `Date`s built on numeric vectors (#755)
+
+* Internal implementations of `dense_rank`, `min_rank`, `cume_dist`, `ntile`, 
+  `row_number` and `percent_rank` deal correctly with NA (#774)
+
+* `*_join` functions can now deal with multiple encodings (#769)  
+  
+* `*_join` functions creates correctly named results (#855)
+
 # dplyr 0.3.0.1
 
 * Fixed problem with test script on Windows.

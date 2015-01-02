@@ -12,7 +12,7 @@ select_(.data, ..., .dots)
 
 rename(.data, ...)
 
-rename_(.data, ...)
+rename_(.data, ..., .dots)
 }
 \arguments{
 \item{.data}{A tbl. All main verbs are S3 generics and provide methods
@@ -85,6 +85,9 @@ select(iris, -Petal.Length, -Petal.Width)
 # Rename variables:
 # * select() keeps only the variables you specify
 select(iris, petal_length = Petal.Length)
+# Renaming multiple variables uses a prefix:
+select(iris, petal = starts_with("Petal"))
+
 # * rename() keeps all variables
 rename(iris, petal_length = Petal.Length)
 

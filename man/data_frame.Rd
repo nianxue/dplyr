@@ -32,9 +32,13 @@ data_frame(x = runif(10), y = x * 2)
 
 # data_frame never coerces its inputs
 str(data_frame(letters))
-str(data_frame(x = diag(5)))
+str(data_frame(x = list(diag(1), diag(2))))
 
 # or munges column names
 data_frame(`a + b` = 1:5)
+}
+\seealso{
+\code{\link{as_data_frame}} to turn an existing list into
+  a data frame.
 }
 

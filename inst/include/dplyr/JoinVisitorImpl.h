@@ -42,6 +42,13 @@ namespace dplyr{
             }
         }
         
+        inline void debug(){
+            Rprintf( "visitor= %s. left=", DEMANGLE(JoinVisitorImpl) ) ;
+            Rf_PrintValue(left) ;
+            Rprintf( "right=" ) ;
+            Rf_PrintValue(right) ;
+        }
+        
         LHS_Vec left ;
         RHS_Vec right ;
         LHS_hasher LHS_hash_fun ;
@@ -92,6 +99,12 @@ namespace dplyr{
             Rcpp::Rcout << get(i) << std::endl ;
         }
         
+        inline void debug(){
+            Rprintf( "visitor= %s. left=", DEMANGLE(JoinVisitorImpl) ) ;
+            Rf_PrintValue(left) ;
+            Rprintf( "right=" ) ;
+            Rf_PrintValue(right) ;
+        }
         
     protected:
         Vec left, right ;
@@ -103,6 +116,38 @@ namespace dplyr{
         
     } ; 
     
+    class JoinStringOrderer {
+    public:
+        JoinStringOrderer( const CharacterVector& left_, const CharacterVector& right_ ) : 
+            left(left_), right(right_), nleft(left.size()), nright(right.size())
+        {
+            make_orders() ;  
+        }
+            
+        inline int get_order(int i) const {
+            if( i == NA_INTEGER ) return NA_INTEGER ;
+            return (i>=0) ? orders[i] : orders[nleft-i-1] ;
+        }
+        
+    private:
+        const CharacterVector& left ;
+        const CharacterVector& right ;
+        int nleft, nright ;
+        IntegerVector orders ;
+        
+        inline void make_orders(){
+            CharacterVector big( nleft + nright ) ;
+            CharacterVector::iterator it = big.begin() ;
+            std::copy( left.begin(), left.end(), it ) ;
+            std::copy( right.begin(), right.end(), it + nleft ) ;
+            
+            Language call( "rank", big, _["ties.method"] = "min" ) ;
+            orders = call.eval() ;  
+        }
+        
+    } ;
+    
+    
     template <>
     class JoinVisitorImpl<STRSXP,STRSXP> : public JoinVisitor, public comparisons<STRSXP>{
     public:
@@ -110,22 +155,18 @@ namespace dplyr{
         
         typedef CharacterVector Vec ;
         typedef SEXP STORAGE ;
-        typedef boost::hash<STORAGE> hasher ;
+        typedef boost::hash<int> hasher ;
     
-        JoinVisitorImpl( CharacterVector left_, CharacterVector right_ ) : left(left_), right(right_){
-            check_all_same_encoding(left,right) ;
-            // check_all_utf8(left); 
-            // check_all_utf8(right);
-        }
+        JoinVisitorImpl( CharacterVector left_, CharacterVector right_ ) : 
+            left(left_), right(right_), orderer(left,right)
+        {}
               
         inline size_t hash(int i){
-            return hash_fun( get(i) ) ; 
+            return hash_fun( orderer.get_order(i) ) ;
         }
         
         inline bool equal( int i, int j) {
-            return Compare::equal_or_both_na(
-                get(i), get(j) 
-            ) ;  
+            return orderer.get_order(i) == orderer.get_order(j) ;
         }
         
         inline SEXP subset( const std::vector<int>& indices ) {
@@ -150,10 +191,19 @@ namespace dplyr{
             Rcpp::Rcout << get(i) << std::endl ;
         }
         
+        inline void debug(){
+            Rprintf( "visitor= %s. left=", DEMANGLE(JoinVisitorImpl) ) ;
+            Rf_PrintValue(left) ;
+            Rprintf( "right=" ) ;
+            Rf_PrintValue(right) ;
+        }
+        
         
     protected:
+        
         CharacterVector left, right ;
         hasher hash_fun ;
+        JoinStringOrderer orderer ;
         
         inline STORAGE get(int i){
             return i >= 0 ? left[i] : right[-i-1] ;    
@@ -175,22 +225,18 @@ namespace dplyr{
             left(left_), 
             right(right_),
             left_ptr(left_.begin()), 
-            left_factor_ptr(Rcpp::internal::r_vector_start<STRSXP>(left_.attr("levels")) ), 
-            right_ptr(Rcpp::internal::r_vector_start<STRSXP>(right_))
-        {
-            check_all_same_encoding(right_, left_.attr("levels")) ; 
-            // check_all_utf8(right_) ;
-            // check_all_utf8(left_.attr("levels")) ;
-        }
+            left_levels( left_.attr("levels") ), 
+            left_factor_ptr(Rcpp::internal::r_vector_start<STRSXP>(left_levels) ), 
+            right_ptr(Rcpp::internal::r_vector_start<STRSXP>(right_)), 
+            orderer(left_levels, right)
+        {}
             
         inline size_t hash(int i){
-            return string_hash( get(i) ) ;
+            return hash_fun( orderer.get_order(get_pos(i)) ) ;
         }
         
         inline bool equal( int i, int j){
-            SEXP left  = get(i) ;
-            SEXP right = get(j) ;
-            return left == right ;     
+            return orderer.get_order(get_pos(i)) == orderer.get_order(get_pos(j)) ;      
         }
         
         inline void print(int i){
@@ -215,13 +261,22 @@ namespace dplyr{
             return res ;    
         }
         
+        inline void debug(){
+            Rprintf( "visitor= %s. left(levels) =", DEMANGLE(JoinFactorStringVisitor) ) ;
+            Rf_PrintValue(left_levels) ;
+            Rprintf( "right=" ) ;
+            Rf_PrintValue(right) ;
+        }
+        
     private:
         IntegerVector left ;
         CharacterVector right ;
-        int* left_ptr ;
+        IntegerVector::const_iterator left_ptr ;
+        CharacterVector left_levels ;
         SEXP* left_factor_ptr ;
         SEXP* right_ptr ;
-        boost::hash<SEXP> string_hash ;
+        boost::hash<int> hash_fun ;
+        JoinStringOrderer orderer ;
     
         inline SEXP get(int i){
             if( i>=0 ){
@@ -232,6 +287,14 @@ namespace dplyr{
             }
         }
         
+        inline int get_pos( int i ){
+            if( i>= 0 ) {
+                if( left_ptr[i] == NA_INTEGER ) return NA_INTEGER ;
+                return left_ptr[i] - 1 ;
+            }
+            return i ;
+        }
+        
     } ;
     
     class JoinStringFactorVisitor : public JoinVisitor {
@@ -240,20 +303,18 @@ namespace dplyr{
             left(left_), 
             right(right_),
             right_ptr(right_.begin()), 
-            right_factor_ptr(Rcpp::internal::r_vector_start<STRSXP>(right_.attr("levels")) ), 
-            left_ptr(Rcpp::internal::r_vector_start<STRSXP>(left_))
-        {
-            check_all_same_encoding(left_,right_.attr("levels")) ;
-        }
+            right_levels(right_.attr("levels")),
+            right_factor_ptr(Rcpp::internal::r_vector_start<STRSXP>(right_levels) ), 
+            left_ptr(Rcpp::internal::r_vector_start<STRSXP>(left_)), 
+            orderer(left, right_levels) 
+        {}
                 
         inline size_t hash(int i){ 
-            return string_hash( get(i) ) ;
+            return hash_fun( orderer.get_order(get_pos(i)) ) ;
         }
         
         inline bool equal( int i, int j){
-            SEXP left = get(i) ;
-            SEXP right = get(j) ;
-            return left == right ;     
+            return orderer.get_order(get_pos(i)) == orderer.get_order(get_pos(j)) ;
         }
         
         inline void print(int i){
@@ -278,13 +339,22 @@ namespace dplyr{
             return res ;    
         }
         
+        inline void debug(){
+            Rprintf( "visitor= %s. left =", DEMANGLE(JoinStringFactorVisitor) ) ;
+            Rf_PrintValue(left) ;
+            Rprintf( "right(levels)=" ) ;
+            Rf_PrintValue(right_levels) ;
+        }
+        
     private:
         CharacterVector left ;
         IntegerVector right ;
-        int*  right_ptr ;
+        IntegerVector::const_iterator  right_ptr ;
+        CharacterVector right_levels ;
         SEXP* right_factor_ptr ;
         SEXP* left_ptr ;
-        boost::hash<SEXP> string_hash ;
+        boost::hash<int> hash_fun ;
+        JoinStringOrderer orderer ;
     
         inline SEXP get(int i){
             SEXP res ;
@@ -303,6 +373,16 @@ namespace dplyr{
             return res ;
         }
         
+        inline int get_pos(int i) const {
+            if( i>=0 ) {
+                return i ;
+            }
+            int index = right_ptr[-i-1] ;
+            if( index == NA_INTEGER ) return NA_INTEGER ;
+            return - index ;
+        }
+        
+        
     } ;
     
     
@@ -312,12 +392,15 @@ namespace dplyr{
         
         JoinFactorFactorVisitor( const IntegerVector& left, const IntegerVector& right ) : 
             Parent(left, right), 
-            left_levels_ptr( Rcpp::internal::r_vector_start<STRSXP>( left.attr("levels") ) ) ,
-            right_levels_ptr( Rcpp::internal::r_vector_start<STRSXP>( right.attr("levels") ) )
+            left_levels(left.attr("levels")), 
+            right_levels(right.attr("levels")),
+            left_levels_ptr( Rcpp::internal::r_vector_start<STRSXP>( left_levels ) ) ,
+            right_levels_ptr( Rcpp::internal::r_vector_start<STRSXP>( right_levels ) ),
+            orderer(left_levels, right_levels)
             {}
         
         inline size_t hash(int i){
-            return string_hash( get(i) ) ; 
+            return hash_fun( orderer.get_order(get_pos(i)) ) ;
         }
         
         void print(int i){
@@ -325,84 +408,61 @@ namespace dplyr{
         }
         
         inline bool equal( int i, int j){
-            return string_compare.equal_or_both_na( get(i), get(j) ) ;
+            return orderer.get_order(get_pos(i)) ==  orderer.get_order(get_pos(j)) ; 
         }
         
         inline SEXP subset( const VisitorSetIndexSet<DataFrameJoinVisitors>& set ){
             int n = set.size() ;
-            Vec res = no_init(n) ;
+            CharacterVector res(n) ;
             
-            typedef std::set<SEXP, StringLessPredicate> LevelsSet ;
-            LevelsSet levels ;
-            std::vector<SEXP> strings(n) ;
             VisitorSetIndexSet<DataFrameJoinVisitors>::const_iterator it = set.begin() ;
             for( int i=0; i<n; i++, ++it){
-                SEXP s = get(*it) ;
-                levels.insert( s );
-                strings[i] = s ;
+                res[i] = get(*it) ;
             }
-            dplyr_hash_map<SEXP,int> invmap ;
-            
-            int nlevels = levels.size() ;
-            LevelsSet::const_iterator lit = levels.begin() ;
-            CharacterVector levels_vector( nlevels );
-            for( int i=0; i<nlevels; i++, ++lit){
-                invmap[*lit] = i+1 ;
-                levels_vector[i] = *lit ;
-            }
-            
-            for( int i=0; i<n; i++){
-                res[i] = invmap[strings[i]] ;
-            }
-            res.attr( "class" )  = Parent::left.attr("class" ) ;
-            res.attr( "levels" ) = levels_vector ;
             
             return res ;
         }
         
         inline SEXP subset( const std::vector<int>& indices ){
             int n = indices.size() ;
-            Vec res = no_init(n) ;
-            
-            typedef std::set<SEXP, StringLessPredicate> LevelsSet ;
-            LevelsSet levels ;
-            std::vector<SEXP> strings(n) ;
-            for( int i=0; i<n; i++){
-                SEXP s = get(indices[i]) ;
-                levels.insert( s );
-                strings[i] = s ;
-            }
-            dplyr_hash_map<SEXP,int> invmap ;
-            
-            int nlevels = levels.size() ;
-            LevelsSet::const_iterator lit = levels.begin() ;
-            CharacterVector levels_vector( nlevels );
-            for( int i=0; i<nlevels; i++, ++lit){
-                invmap[*lit] = i+1 ;
-                levels_vector[i] = *lit ;
-            }
+            CharacterVector res(n) ;
             
             for( int i=0; i<n; i++){
-                res[i] = invmap[ strings[i] ] ;
+                res[i] = get(indices[i]) ;
             }
-            res.attr( "class" )  = Parent::left.attr("class" ) ;
-            res.attr( "levels" ) = levels_vector ;
-            
+
             return res ;
         }
         
-            
+        inline void debug(){
+            Rprintf( "visitor= %s. left(levels) =", DEMANGLE(JoinVisitorImpl) ) ;
+            Rf_PrintValue(left_levels) ;
+            Rprintf( "right(levels)=" ) ;
+            Rf_PrintValue(right_levels) ;
+        }
+        
     private:
+        CharacterVector left_levels, right_levels ;
         SEXP* left_levels_ptr ;
         SEXP* right_levels_ptr ;
-        comparisons<STRSXP> string_compare ;
-        boost::hash<SEXP> string_hash ;
+        JoinStringOrderer orderer ;
+        boost::hash<int> hash_fun ;
     
         inline SEXP get(int i){
             if( i >= 0 ){
                 return ( left[i] == NA_INTEGER ) ? NA_STRING : left_levels_ptr[ left[i] - 1] ;
             } else {
                 return ( right[-i-1] == NA_INTEGER ) ? NA_STRING : right_levels_ptr[right[-i-1] - 1] ;                  
+            }
+        }
+        
+        inline int get_pos(int i) const {
+            if( i >= 0 ){
+                if( left[i] == NA_INTEGER ) return NA_INTEGER ;    
+                return left[i] - 1 ;
+            } else {
+                if( right[-i-1] == NA_INTEGER ) return NA_INTEGER ;
+                return - right[-i-1] ;
             }
         }
         
@@ -425,7 +485,8 @@ namespace dplyr{
         
     private:
         inline SEXP promote( Vec vec){
-            vec.attr( "class" ) = JoinVisitorImpl::left.attr( "class" );
+            // vec.attr( "class" ) = JoinVisitorImpl::left.attr( "class" );
+            copy_most_attributes(vec,JoinVisitorImpl::left ) ; 
             return vec ;
         }
     } ;
@@ -440,7 +501,7 @@ namespace dplyr{
     PROMOTE_JOIN_VISITOR(DateJoinVisitor)
     PROMOTE_JOIN_VISITOR(POSIXctJoinVisitor)
     
-    JoinVisitor* join_visitor( SEXP, SEXP, const std::string&, const std::string& ) ;
+    JoinVisitor* join_visitor( SEXP, SEXP, const std::string&, const std::string&, bool warn ) ;
 }
 
 #endif

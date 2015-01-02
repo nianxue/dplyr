@@ -333,3 +333,44 @@ test_that("mutate forbids POSIXlt results (#670)", {
   
 })
 
+test_that("constant factor can be handled by mutate (#715)",{
+  d <- data_frame(x=1:2) %>% mutate(y=factor("A"))
+  expect_true( is.factor(d$y) )
+  expect_equal( d$y, factor( c("A", "A") ) )  
+})
+
+test_that("row_number handles empty data frames (#762)", {
+  df <- data.frame(a = numeric(0))
+  res <- df %>% mutate( 
+    row_number_0 = row_number(), row_number_a =  row_number(a), ntile = ntile(a, 2), 
+    min_rank = min_rank(a), percent_rank = percent_rank(a), 
+    dense_rank = dense_rank(a), cume_dist = cume_dist(a) 
+  )
+  expect_equal( names(res), c("a", "row_number_0", "row_number_a", "ntile", "min_rank", "percent_rank", "dense_rank", "cume_dist" ) )
+  expect_equal( nrow(res), 0L )
+})
+
+test_that("no utf8 invasion (#722)", {
+  df  <- data.frame(中文1 = 1:10, 中文2 = 1:10, eng = 1:10)
+  df2 <- df %>% mutate(中文1 = 中文1 + 1)
+  gdf2 <- df %>% group_by(eng) %>% mutate(中文1 = 中文1 + 1)
+  
+  expect_equal( strings_addresses(names(df)) ,  strings_addresses(names(df2)) )
+  expect_equal( strings_addresses(names(df)) ,  strings_addresses(names(gdf2)) )
+  
+  df3 <- filter(df2, eng > 5)
+  gdf3 <- filter(gdf2, eng > 5)
+  expect_equal( strings_addresses(names(df)) ,  strings_addresses(names(df3)) )
+  expect_equal( strings_addresses(names(df)) ,  strings_addresses(names(gdf3)) )
+  
+  df4 <- filter(df2, 中文1 > 5)
+  gdf4 <- filter(gdf2, 中文1 > 5)
+  expect_equal( strings_addresses(names(df)) ,  strings_addresses(names(df4)) )
+  expect_equal( strings_addresses(names(df)) ,  strings_addresses(names(gdf4)) )
+})
+
+test_that("mutate warns about unsupported attributes", {
+  d <- data.frame( x = structure( 1:10, foo = "bar" ) )  
+  expect_error( d %>% group_by(x), "has unsupported attributes" )
+})
+

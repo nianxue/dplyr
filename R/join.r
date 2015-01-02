@@ -16,8 +16,9 @@
 #'    between x and y, all combination of the matches are returned.}
 #'
 #'    \item{\code{left_join}}{return all rows from x, and all columns from x
-#'    and y. If there are multiple matches between x and y, all combination of
-#'    the matches are returned.}
+#'    and y. Rows in x with no match in y will have NA values in the new
+#'    columns. If there are multiple matches between x and y, all combinations
+#'    of the matches are returned.}
 #'
 #'    \item{\code{semi_join}}{return all rows from x where there are matching
 #'    values in y, keeping just columns from x.
@@ -73,8 +74,8 @@ right_join <- function(x, y, by = NULL, copy = FALSE, ...) {
 
 #' @rdname join
 #' @export
-outer_join <- function(x, y, by = NULL, copy = FALSE, ...) {
-  UseMethod("outer_join")
+full_join <- function(x, y, by = NULL, copy = FALSE, ...) {
+  UseMethod("full_join")
 }
 
 #' @rdname join
@@ -91,10 +92,13 @@ anti_join <- function(x, y, by = NULL, copy = FALSE, ...) {
 
 common_by <- function(by = NULL, x, y) {
   if (!is.null(by)) {
-    return(list(
-      x = names(by) %||% by,
-      y = unname(by)
-    ))
+    x <- names(by) %||% by
+    y <- unname(by)
+
+    # If x partially named, assume unnamed are the same in both tables
+    x[x == ""] <- y[x == ""]
+
+    return(list(x = x, y = y))
   }
 
   by <- intersect(tbl_vars(x), tbl_vars(y))

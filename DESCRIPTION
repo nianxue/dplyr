@@ -19,11 +19,10 @@ Imports:
     R6,
     Rcpp,
     magrittr,
-    lazyeval (>= 0.1.8),
+    lazyeval (>= 0.1.9.9001),
     DBI (>= 0.3)
 Suggests:
-    RSQLite,
-    RSQLite.extfuns,
+    RSQLite (>= 1.0.0),
     RMySQL,
     RPostgreSQL,
     data.table,
@@ -44,7 +43,6 @@ Collate:
     'RcppExports.R'
     'all-equal.r'
     'bench-compare.r'
-    'cbind.r'
     'chain.r'
     'cluster.R'
     'colwise.R'
@@ -66,21 +64,15 @@ Collate:
     'funs.R'
     'glimpse.R'
     'group-by.r'
+    'group-indices.R'
     'group-size.r'
     'grouped-df.r'
     'grouped-dt.r'
     'id.r'
     'inline.r'
-    'join-df.r'
-    'join-dt.r'
-    'join-sql.r'
     'join.r'
     'lead-lag.R'
     'location.R'
-    'manip-cube.r'
-    'manip-df.r'
-    'manip-dt.r'
-    'manip-sql.r'
     'manip.r'
     'nth-value.R'
     'order-by.R'
@@ -105,7 +97,6 @@ Collate:
     'src.r'
     'tally.R'
     'tbl-cube.r'
-    'tbl-data-frame.R'
     'tbl-df.r'
     'tbl-dt.r'
     'tbl-sql.r'
